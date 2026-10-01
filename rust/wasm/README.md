@@ -14,7 +14,7 @@ operate on the same f64 camera for all algorithms.
 
 `render_plan.rs` owns 2D rendering policy: predicted zoom targets, coverage checks,
 completed-cache selection, base/detail transitions, job priorities, protected LRU
-eviction, and adaptive tile budgets. `web/render-plan.mjs` marshals metadata and
+eviction, job creation/retirement, reprojection uniforms, and adaptive tile budgets. `web/render-plan.mjs` marshals metadata and
 resolves returned IDs to browser resources. `web/src.js` continues to create and
 destroy textures, submit GPU commands, and handle browser input. Diagnostics stay
 in JavaScript. This migration does not change the 3D renderer.
@@ -22,7 +22,7 @@ in JavaScript. This migration does not change the 3D renderer.
 The planner input is a bounded array of 128 records, each containing 16 f64s:
 ID, camera x/y/scale, visible height, texture width/height, complete flag,
 active-job flag, next tile, total tiles, texture bytes, last-used time,
-completion time, and two reserved values. IDs start at 1; zero means no image.
+completion time, visible width, and one reserved value. IDs start at 1; zero means no image.
 JavaScript checks capacity before copying. The dimensions and timestamps keep
 existing units (pixels and milliseconds); camera coordinates retain f64 precision.
 
@@ -30,7 +30,16 @@ The selection output contains base ID, detail ID, transition start, job count,
 and ordered job IDs. Target output contains count, zoom direction, and camera
 triples. Eviction output contains count followed by IDs. Results are copied before
 the next planner call because they share one output buffer. Settings changes reset
-the planner along with the browser cache. No WebGPU handles cross into WASM.
+the planner along with the browser cache. No WebGPU handles cross into WASM. Scheduling returns retirement IDs and requested
+camera triples; predicted allocations participate in subsequent coverage decisions.
+Reprojection is a separate 16-f32 output matching the GPU's 64-byte layout.
+
+After `make build`, run `node scripts/check-render-plan.mjs` to compare the real
+WASM planner against the pre-migration JavaScript retained in git at `5e71a6e`.
+It checks 6,000 seeded selection, priority, scheduling, eviction, and reprojection
+cases plus 96,000 coverage comparisons. The original git commit must be available
+(a shallow clone may need to fetch history). Browser benchmarks remain accessible
+through `?metrics=1`; no tests directory is required.
 
 ## GPU data
 
@@ -145,8 +154,7 @@ this is not a full mip pyramid or arbitrary-scale anti-aliasing. The detail
 rectangle is feathered over eight display pixels. The final color is converted
 to straight alpha for the display pipeline's source-alpha blend.
 
-The fourth reprojection vec4 stores the old base rectangle in screen pixels
-(left, top, right, bottom). Detail alpha is opaque beyond that rectangle and
-blended within it, so zooming out does not fade newly revealed pixels from black.
-Completed wider details are promoted after their fade even if continued zoom-out
-has overtaken their bounds; this avoids reverting to the smaller prior base.
+The fourth reprojection vec4 holds old base bounds in screen pixels. Zoom-out
+uses these bounds to crossfade overlap without darkening newly exposed edges.
+Completed wider views can become the base after fading even when both images
+have been overtaken by continued zoom-out.
