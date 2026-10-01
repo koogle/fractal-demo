@@ -112,9 +112,6 @@ async function start() {
     jobs.splice(jobs.indexOf(job), 1);
     job.texture.destroy(); job.tileTimes.destroy(); job.reprojection.destroy(); releaseJobBuffers(job);
   }
-  function fits(image, camera, width, height, maxMagnification = Infinity) {
-    return planner.fits(image, camera, width, height, maxMagnification);
-  }
   function trimImages(reserved, protectedImage) {
     for (const image of planner.evictions(images, reserved, memoryBudget, maxCachedImages, protectedImage)) {
       images.splice(images.indexOf(image), 1);
@@ -316,17 +313,10 @@ async function start() {
       const {ready, displayed} = planner.cached(images, exactCamera, width, height, now);
       if (displayed) displayed.used = now;
       const prediction = planner.targets(exactCamera, now, moving, zoomAnchor, zoomDirection, maxJobs);
-      const targets = prediction.targets;
       zoomDirection = prediction.direction;
-      // Keep work that still covers the trajectory instead of restarting it
-      // on every wheel event. At most eight independent views are in progress.
-      for (const job of [...jobs]) {
-        if (!targets.some(camera => fits(job, camera, width, height, 1.25))) retireJob(job);
-      }
-      for (const [index, camera] of targets.entries()) {
-        if (images.some(image => image.complete && fits(image, camera, width, height, 1.05)) ||
-            jobs.some(job => fits(job, camera, width, height, 1.05))) continue;
-        if (jobs.length >= maxJobs) break;
+      const schedule = planner.schedule(images, jobs, maxJobs, extent);
+      for (const job of schedule.retired) retireJob(job);
+      for (const {index, camera} of schedule.requests) {
         const job = createJob(camera, width, height, index !== 0, displayed, extent);
         if (job) jobs.push(job);
       }
@@ -336,14 +326,8 @@ async function start() {
       const layers = displayDetail ? [displayBase, displayDetail] : [displayBase];
       for (const [index, image] of layers.entries()) {
         image.used = now;
-        const transform = [(exactCamera[0] - image.camera[0]) / image.camera[2],
-          -(exactCamera[1] - image.camera[1]) / image.camera[2], exactCamera[2] / image.camera[2]];
-        const usable = transform.every(value => Number.isFinite(value) && Math.abs(value) < 1e30);
-        device.queue.writeBuffer(image.reprojection, 0, new Float32Array([
-          ...(usable ? [...transform, 1] : [0, 0, 1, 0]),
-          now / 1000, detailSince / 1000, index === 0 ? 0 : fadeSeconds, 0,
-          image.geometry[0], image.geometry[1], image.geometry[0], image.geometry[1],
-        ]));
+        device.queue.writeBuffer(image.reprojection, 0,
+          planner.reprojection(image, index, fadeSeconds * 1000));
       }
       const encoder = device.createCommandEncoder();
       const batches = [];

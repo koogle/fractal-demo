@@ -11,7 +11,7 @@ export class RenderPlanner {
     for(const [index,image] of resources.entries())input.set([
       image.id,...image.camera,image.geometry[1],image.texture.width,image.texture.height,
       Number(image.complete),Number(index>=images.length),image.nextTile,image.totalTiles,
-      image.bytes,image.used,image.completedAt??0,0,0,
+      image.bytes,image.used,image.completedAt??0,image.geometry[0],0,
     ],index*16);
     this.rust.planner_load(resources.length,...camera,width,height,now);
     return new Map(resources.map(image=>[image.id,image]));
@@ -29,6 +29,20 @@ export class RenderPlanner {
     const pointer=this.rust.planner_targets(...camera,now,Number(moving),...anchor,direction,count);
     const [length,nextDirection]=this.read(pointer,2), values=this.read(pointer+16,length*3);
     return {direction:nextDirection,targets:Array.from({length},(_,i)=>Array.from(values.slice(i*3,i*3+3)))};
+  }
+  schedule(images,jobs,maxJobs,extent) {
+    const resources=this.load(images,jobs);
+    const pointer=this.rust.planner_schedule(maxJobs,extent);
+    const [retireCount,requestCount]=this.read(pointer,2);
+    const retired=Array.from(this.read(pointer+16,retireCount),id=>resources.get(id));
+    const requests=this.read(pointer+16+retireCount*8,requestCount*4);
+    return {retired,requests:Array.from({length:requestCount},(_,i)=>({
+      index:requests[i*4],camera:Array.from(requests.slice(i*4+1,i*4+4)),
+    }))};
+  }
+  reprojection(image,layer,fadeMs) {
+    const pointer=this.rust.planner_reprojection(image.id,layer,fadeMs);
+    return new Float32Array(this.rust.memory.buffer,pointer,12).slice();
   }
   select(images,jobs,fadeMs) {
     const resources=this.load(images,jobs);

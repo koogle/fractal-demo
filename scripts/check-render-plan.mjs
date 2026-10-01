@@ -29,7 +29,31 @@ for(let scenario=0;scenario<200;scenario++){
   const actual=planner.select(images,resources.filter(i=>!i.complete),140);
   assert.deepEqual([actual.base?.id,actual.detail?.id,actual.since,actual.jobs.map(i=>i.id)],[pair.base?.id,pair.detail?.id,pair.since,jobs.map(i=>i.id)],`scenario ${scenario}, frame ${step}`);
   for(const i of resources)assert.equal(planner.fits(i,camera,1600,900,1.05),fits(i,camera,1600,900,1.05));
+  for(const [layer,image] of [actual.base,actual.detail].filter(Boolean).entries()){
+    const transform=[(camera[0]-image.camera[0])/image.camera[2],-(camera[1]-image.camera[1])/image.camera[2],camera[2]/image.camera[2]];
+    const expected=new Float32Array([...transform,1,now/1000,pair.since/1000,layer?0.14:0,0,1600,900,1600,900]);
+    assert.deepEqual(planner.reprojection(image,layer,140),expected);
+  }
+  const {targets}=planner.targets(camera,now,step%2,[.2,-.1],.7,8);
+  const oldJobs=resources.filter(i=>!i.complete);
+  const retired=oldJobs.filter(i=>i!==pair.base&&i!==pair.detail&&!targets.some(c=>fits(i,c,1600,900,1.25)));
+  const kept=oldJobs.filter(i=>!retired.includes(i));const requests=[];const simulated=[...images,...kept];let jobCount=kept.length;
+  for(const [index,target] of targets.entries()){
+    if(simulated.some(i=>fits(i,target,1600,900,1.05)))continue;
+    if(jobCount>=8)break;
+    requests.push({index,camera:target});jobCount++;
+    simulated.push({camera:target,geometry:[1600,900],texture:{width:2000,height:1126}});
+  }
+  const scheduled=planner.schedule(images,oldJobs,8,1.25);
+  assert.deepEqual(scheduled.retired.map(i=>i.id),retired.map(i=>i.id));
+  assert.deepEqual(scheduled.requests,requests);
+  const protectedImage=images[0],budget=18016000*5;
+  let bytes=images.reduce((sum,i)=>sum+i.bytes,0),count=images.length;const evicted=[];
+  for(const i of images.filter(i=>i!==pair.base&&i!==pair.detail&&i!==protectedImage).sort((a,b)=>a.used-b.used)){
+    if(bytes<=budget&&count<=4)break;evicted.push(i.id);bytes-=i.bytes;count--;
+  }
+  assert.deepEqual(planner.evictions(images,0,budget,4,protectedImage).map(i=>i.id),evicted);
   checks++;
  }
 }
-console.log(`${checks} seeded selection/priority comparisons and ${checks*16} coverage comparisons passed.`);
+console.log(`${checks} seeded selection, priority, scheduling, eviction, and reprojection comparisons and ${checks*16} coverage comparisons passed.`);

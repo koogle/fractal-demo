@@ -4,12 +4,13 @@ use std::cell::RefCell;
 const CAPACITY: usize = 128;
 const STRIDE: usize = 16;
 static mut INPUT: [[f64; STRIDE]; CAPACITY] = [[0.0; STRIDE]; CAPACITY];
-static mut OUTPUT: [f64; CAPACITY + 8] = [0.0; CAPACITY + 8];
-#[derive(Clone)]
+static mut OUTPUT: [f64; CAPACITY * 2 + 8] = [0.0; CAPACITY * 2 + 8];
+#[derive(Clone, Default)]
 struct Image {
     id: u32,
     camera: [f64; 3],
     height: f64,
+    width: f64,
     texture: [f64; 2],
     complete: bool,
     active: bool,
@@ -52,6 +53,7 @@ fn fits(
 #[derive(Default)]
 struct Planner {
     images: Vec<Image>,
+    targets: Vec<[f64; 3]>,
     camera: [f64; 3],
     width: f64,
     height: f64,
@@ -64,7 +66,7 @@ struct Planner {
 }
 thread_local! { static PLAN: RefCell<Planner> = RefCell::new(Planner::default()); }
 fn output(values: &[f64]) -> *const f64 {
-    assert!(values.len() <= CAPACITY + 8);
+    assert!(values.len() <= CAPACITY * 2 + 8);
     unsafe {
         core::ptr::copy_nonoverlapping(
             values.as_ptr(),
@@ -270,6 +272,7 @@ pub extern "C" fn planner_load(
                 bytes: v[11],
                 used: v[12],
                 completed: v[13],
+                width: v[14],
             });
         }
     });
@@ -359,6 +362,7 @@ pub extern "C" fn planner_targets(
         let step = (-((p.rate.abs() * 0.12).clamp(0.16, 0.42))).exp();
         let count = count.min(8);
         let mut result = vec![0.0, direction];
+        p.targets.clear();
         for index in 0..count {
             let factor = if moving != 0 {
                 step.powi(index as i32 * sign)
@@ -372,6 +376,7 @@ pub extern "C" fn planner_targets(
             let s = scale * factor;
             let target = [x + ax * (scale - s), y + ay * (scale - s), s];
             if s > 0.0 && target.iter().all(|v| v.is_finite()) {
+                p.targets.push(target);
                 result.extend(target);
             }
         }
@@ -406,4 +411,101 @@ pub extern "C" fn planner_tune_batch(
     ((tiles as f64 * (target / elapsed.max(1.0)).min(1.25)).floor() as u32)
         .min(max_tiles)
         .max(max_jobs)
+}
+
+// Request/retirement policy runs against one metadata snapshot. Planned views
+// participate in coverage checks, just like successfully allocated JS jobs did.
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_schedule(max_jobs: u32, extent: f64) -> *const f64 {
+    PLAN.with(|p| {
+        let p = p.borrow();
+        let retired: Vec<u32> = p
+            .images
+            .iter()
+            .filter(|i| {
+                i.active
+                    && i.id != p.base
+                    && i.id != p.detail
+                    && !p
+                        .targets
+                        .iter()
+                        .any(|&c| i.fits(c, p.width, p.height, 1.25))
+            })
+            .map(|i| i.id)
+            .collect();
+        let mut available: Vec<Image> = p
+            .images
+            .iter()
+            .filter(|i| i.complete || (i.active && !retired.contains(&i.id)))
+            .cloned()
+            .collect();
+        let mut jobs = available.iter().filter(|i| i.active).count();
+        let mut requests = Vec::new();
+        for (index, &camera) in p.targets.iter().enumerate() {
+            if available
+                .iter()
+                .any(|i| i.fits(camera, p.width, p.height, 1.05))
+            {
+                continue;
+            }
+            if jobs >= max_jobs.min(8) as usize {
+                break;
+            }
+            requests.extend([index as f64, camera[0], camera[1], camera[2]]);
+            available.push(Image {
+                camera,
+                width: p.width,
+                height: p.height,
+                texture: [
+                    p.width + 2.0 * (p.width * (extent - 1.0) / 2.0).ceil(),
+                    p.height + 2.0 * (p.height * (extent - 1.0) / 2.0).ceil(),
+                ],
+                active: true,
+                ..Image::default()
+            });
+            jobs += 1;
+        }
+        let mut result = vec![retired.len() as f64, (requests.len() / 4) as f64];
+        result.extend(retired.into_iter().map(f64::from));
+        result.extend(requests);
+        output(&result)
+    })
+}
+static mut REPROJECTION: [f32; 12] = [0.0; 12];
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_reprojection(id: u32, layer: u32, fade_ms: f64) -> *const f32 {
+    PLAN.with(|p| {
+        let p = p.borrow();
+        let mut values = [0.0_f32; 12];
+        if let Some(i) = p.image(id) {
+            let transform = [
+                (p.camera[0] - i.camera[0]) / i.camera[2],
+                -(p.camera[1] - i.camera[1]) / i.camera[2],
+                p.camera[2] / i.camera[2],
+            ];
+            if transform.iter().all(|v| v.is_finite() && v.abs() < 1e30) {
+                for n in 0..3 {
+                    values[n] = transform[n] as f32;
+                }
+                values[3] = 1.0;
+            } else {
+                values[2] = 1.0;
+            }
+            values[4] = (p.now / 1000.0) as f32;
+            values[5] = (p.since / 1000.0) as f32;
+            values[6] = if layer == 0 {
+                0.0
+            } else {
+                (fade_ms / 1000.0) as f32
+            };
+            values[8] = i.width as f32;
+            values[9] = i.height as f32;
+            values[10] = i.width as f32;
+            values[11] = i.height as f32;
+        }
+        unsafe {
+            REPROJECTION = values;
+        }
+    });
+    core::ptr::addr_of!(REPROJECTION).cast::<f32>()
 }
