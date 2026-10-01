@@ -43,7 +43,6 @@ Export the full JSON from the panel. Stored reports here contain summary/checks;
 the browser export additionally includes frame samples.
 
 ```sh
-make test
 node scripts/compare-metrics.mjs benchmarks/rounds/3-before.json benchmarks/rounds/3-after.json
 ```
 
