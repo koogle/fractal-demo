@@ -32,7 +32,7 @@ triples. Eviction output contains count followed by IDs. Results are copied befo
 the next planner call because they share one output buffer. Settings changes reset
 the planner along with the browser cache. No WebGPU handles cross into WASM. Scheduling returns retirement IDs and requested
 camera triples; predicted allocations participate in subsequent coverage decisions.
-Reprojection is a separate 12-f32 output matching the GPU's existing 48-byte layout.
+Reprojection is a separate 16-f32 output matching the GPU's 64-byte layout, including the old base bounds.
 
 After `make build`, run `node scripts/check-render-plan.mjs` to compare the real
 WASM planner against the pre-migration JavaScript retained in git at `5e71a6e`.
@@ -62,7 +62,7 @@ padding is rounded up independently on each edge. The compute and repair shaders
 use the same `pixel_offset` function, subtracting padding before mapping visible
 pixels to world coordinates. Padding never multiplies the camera scale.
 
-`camera_ptr` returns center x/y and scale as three f64 values. A separate 48-byte
+`camera_ptr` returns center x/y and scale as three f64 values. A separate 64-byte
 reprojection uniform contains the current image transform, transition timing, and
 visible dimensions. Camera differences are calculated before conversion to f32.
 The display maps onto the center of each padded texture using its visible pixel

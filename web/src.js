@@ -139,7 +139,7 @@ async function start() {
     const referenceBuffer = device.createBuffer({ size: 1026 * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(referenceBuffer, 0,
       new Uint8Array(rust.memory.buffer, rust.reference_data_ptr(), (referenceLength + 1) * 16));
-    const reprojection = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const reprojection = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const tileTimes = device.createBuffer({ size: Math.ceil(width / 64) * Math.ceil(height / 64) * 4,
       usage: GPUBufferUsage.STORAGE });
     const view = texture.createView();

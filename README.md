@@ -27,7 +27,6 @@ Serve the contents of `web/` on a static host, including the generated
 `fractal.wasm` file. Configure `.wasm` responses as `application/wasm`.
 
 See [references](references/README.md) for shader and WebGPU implementation notes.
-te-coverage request.
 
 ## Renderer metrics and regression benchmark
 
@@ -70,3 +69,39 @@ anchors and pans. Burst gestures are 80 ms apart. Checkpoints allow four seconds
 to recover full estimated sharp coverage. These drive the same Rust zoom/pan
 exports as the controls; they do not measure operating-system trackpad delivery.
 See `benchmarks/rounds/README.md` for the three optimization rounds and tradeoffs.
+
+## 3D Mandelbulb
+
+Choose **3D Mandelbulb** in the top-left view tabs, or open `/3d.html`.
+Drag to orbit, Shift-drag to pan, and scroll/pinch to dolly the camera.
+**Pan drag** provides panning without holding a modifier; middle/right dragging
+also pans. **Reset view** restores the camera, power 8, and 12 iterations.
+Power and detail sliders change the fractal through Rust exports.
+
+The 3D view uses the same Rust/WASM → uniforms → WebGPU pipeline, with a separate
+camera and a distance-estimated ray marcher. Rust owns the orbit target, camera
+basis, distance, and fractal parameters in `scene3d.rs`; `mandelbulb.wgsl` is embedded
+in the same `fractal.wasm`. Its 112-byte uniform has seven vec4 blocks. Rust animates an orbiting point
+light; secondary distance-estimated rays approximate soft cast shadows. A dim
+fill light, orbit-trap coloring, and ambient occlusion expose the surface shape.
+**Pause light** holds the current light position; **Resume light** continues its orbit.
+
+3D uses fresh rays for camera motion, since a flat cached image cannot represent
+newly exposed surfaces. Motion resolution adapts between 400 and 960 pixels on
+the longest side with a 112-step marching budget. After release it uses 224 marching steps. Moving lighting renders at up to
+1000 pixels on the longest side. Pausing the light refines at up to 1400 pixels,
+then stops submitting work until something changes. Shadow rays keep the same 40-step budget during gestures and at rest to avoid
+lighting changes when zooming. Light animation follows elapsed time independently
+of rendering speed; hidden tabs and the pause control suspend its clock. Their finite budget approximates visibility
+and can miss very thin occluders. Background tabs stop rendering.
+Only one submission is in flight; inputs during a submission are coalesced into
+the next camera frame. The existing 2D cache stays in the 2D view.
+
+Rust sweeps camera movements against a conservative CPU version of the Mandelbulb
+distance estimator, stopping with a small surface clearance. This also applies
+to panning and short orbit arcs, preventing large input jumps through the object.
+Changing the fractal shape moves the camera back if the new surface encloses it.
+These are approximate fractal distance estimates, not exact mesh collisions. Distance estimation is
+approximate, GPU arithmetic has finite precision, and zoom distance is bounded
+from 0.02 to 80 scene units. This 3D path does not offer arbitrary-depth precision
+or the 2D benchmark's performance guarantees. The model requires no asset downloads.

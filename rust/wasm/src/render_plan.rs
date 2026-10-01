@@ -471,12 +471,12 @@ pub extern "C" fn planner_schedule(max_jobs: u32, extent: f64) -> *const f64 {
         output(&result)
     })
 }
-static mut REPROJECTION: [f32; 12] = [0.0; 12];
+static mut REPROJECTION: [f32; 16] = [0.0; 16];
 #[unsafe(no_mangle)]
 pub extern "C" fn planner_reprojection(id: u32, layer: u32, fade_ms: f64) -> *const f32 {
     PLAN.with(|p| {
         let p = p.borrow();
-        let mut values = [0.0_f32; 12];
+        let mut values = [0.0_f32; 16];
         if let Some(i) = p.image(id) {
             let transform = [
                 (p.camera[0] - i.camera[0]) / i.camera[2],
@@ -502,6 +502,24 @@ pub extern "C" fn planner_reprojection(id: u32, layer: u32, fade_ms: f64) -> *co
             values[9] = i.height as f32;
             values[10] = i.width as f32;
             values[11] = i.height as f32;
+            // Match the overlap fix: fade only where the previous base exists.
+            if let Some(base) = p.image(p.base) {
+                let ratio = p.camera[2] / base.camera[2];
+                let shift = [
+                    (p.camera[0] - base.camera[0]) / base.camera[2],
+                    -(p.camera[1] - base.camera[1]) / base.camera[2],
+                ];
+                for (edge, sign) in [-1.0, 1.0].iter().enumerate() {
+                    values[12 + edge * 2] =
+                        (((sign * base.texture[0] / base.height - shift[0]) / ratio * p.height
+                            + p.width)
+                            / 2.0) as f32;
+                    values[13 + edge * 2] =
+                        (((sign * base.texture[1] / base.height - shift[1]) / ratio * p.height
+                            + p.height)
+                            / 2.0) as f32;
+                }
+            }
         }
         unsafe {
             REPROJECTION = values;

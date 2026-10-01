@@ -31,7 +31,12 @@ for(let scenario=0;scenario<200;scenario++){
   for(const i of resources)assert.equal(planner.fits(i,camera,1600,900,1.05),fits(i,camera,1600,900,1.05));
   for(const [layer,image] of [actual.base,actual.detail].filter(Boolean).entries()){
     const transform=[(camera[0]-image.camera[0])/image.camera[2],-(camera[1]-image.camera[1])/image.camera[2],camera[2]/image.camera[2]];
-    const expected=new Float32Array([...transform,1,now/1000,pair.since/1000,layer?0.14:0,0,1600,900,1600,900]);
+    const base=actual.base,ratio=camera[2]/base.camera[2];
+    const shift=[(camera[0]-base.camera[0])/base.camera[2],-(camera[1]-base.camera[1])/base.camera[2]];
+    const bounds=[-1,1].flatMap(sign=>[
+      ((sign*base.texture.width/base.geometry[1]-shift[0])/ratio*900+1600)/2,
+      ((sign*base.texture.height/base.geometry[1]-shift[1])/ratio*900+900)/2]);
+    const expected=new Float32Array([...transform,1,now/1000,pair.since/1000,layer?0.14:0,0,1600,900,1600,900,...bounds]);
     assert.deepEqual(planner.reprojection(image,layer,140),expected);
   }
   const {targets}=planner.targets(camera,now,step%2,[.2,-.1],.7,8);

@@ -20,8 +20,8 @@ struct RepairQueue {
 @group(0) @binding(6) var<storage, read_write> repair_queue: RepairQueue;
 @group(0) @binding(7) var<storage, read_write> repair_dispatch: vec4<u32>;
 // Current transform: x/y shift, scale ratio, available.
-// The previous block stores fade timing; its name preserves the 48-byte layout.
-struct Reprojection { current: vec4<f32>, previous: vec4<f32>, visible_sizes: vec4<f32> }
+// Fade timing and the old base bounds in current screen pixels (64 bytes).
+struct Reprojection { current: vec4<f32>, previous: vec4<f32>, visible_sizes: vec4<f32>, base_bounds: vec4<f32> }
 @group(0) @binding(8) var<uniform> reprojection: Reprojection;
 // The compute and display entry points bind the same tiny per-tile buffer.
 @group(0) @binding(9) var<storage, read> tile_times: array<f32>;
@@ -277,6 +277,11 @@ fn repair_main(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(escape_output, vec2<i32>(pixel), vec4<f32>(result, 0.0, 0.0));
 }
 
+fn base_overlap(screen: vec2<f32>) -> f32 {
+    let edge = min(screen - reprojection.base_bounds.xy, reprojection.base_bounds.zw - screen);
+    return smoothstep(0.0, 8.0, min(edge.x, edge.y));
+}
+
 // Filter shaded colors, never raw escape counts: interior and escaped samples
 // have different meanings. Missing pixels carry zero coverage, not black RGB.
 fn shaded_sample(position: vec2<i32>) -> vec4<f32> {
@@ -290,6 +295,10 @@ fn shaded_sample(position: vec2<i32>) -> vec4<f32> {
         let arrived = tile_times[tile.y * ((size.x + 63u) / 64u) + tile.x];
         opacity = smoothstep(0.0, reprojection.previous.z,
             reprojection.previous.x - max(arrived, reprojection.previous.y));
+        let source_uv = (2.0 * (vec2<f32>(position) + 0.5) - vec2<f32>(size)) / reprojection.visible_sizes.y;
+        let screen_uv = (source_uv - reprojection.current.xy) / reprojection.current.z;
+        let screen = (screen_uv * frame.screen.y + frame.screen.xy) * 0.5;
+        opacity = mix(1.0, opacity, base_overlap(screen));
     }
     var color = vec3<f32>(0.015, 0.022, 0.04);
     if (result.x >= 0.0 && result.y > 0.0) {
@@ -336,7 +345,7 @@ fn fragment_main(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> 
     var edge = 1.0;
     if (reprojection.previous.z > 0.0) {
         let distance = min(position, size - position);
-        edge = smoothstep(0.0, max(1.0, footprint) * 8.0, min(distance.x, distance.y));
+        edge = mix(1.0, smoothstep(0.0, max(1.0, footprint) * 8.0, min(distance.x, distance.y)), base_overlap(pixel.xy));
     }
     return vec4<f32>(color.rgb / color.a, color.a * edge);
 }

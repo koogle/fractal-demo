@@ -21,3 +21,10 @@ input[type="range"] { width: 100%; margin: 0; accent-color: #a5b4fc; cursor: poi
 
 select { width: 100%; border: 1px solid #ffffff30; border-radius: 6px; padding: 6px 8px; background: #111a2b; color: #e0e7f5; font: 12px system-ui, sans-serif; }
 select:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; }
+
+.view-tabs { position: fixed; top: 16px; left: 16px; z-index: 10; display: flex; gap: 4px; padding: 4px; background: #080d19df; border: 1px solid #ffffff24; border-radius: 10px; }
+.view-tabs a { color: #aebed4; text-decoration: none; font-size: 12px; padding: 9px 13px; border-radius: 6px; }
+.view-tabs a[aria-current="page"] { color: #f1f5ff; background: #514474; }
+.view-tabs a:focus-visible { outline: 2px solid #c4b5fd; }
+.gesture-help { color: #aebed4; font-size: 11px; text-align: center; margin: 6px 4px 14px; }
+#render-status { margin: 12px 4px 0; font-variant-numeric: tabular-nums; }

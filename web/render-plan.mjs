@@ -42,7 +42,7 @@ export class RenderPlanner {
   }
   reprojection(image,layer,fadeMs) {
     const pointer=this.rust.planner_reprojection(image.id,layer,fadeMs);
-    return new Float32Array(this.rust.memory.buffer,pointer,12).slice();
+    return new Float32Array(this.rust.memory.buffer,pointer,16).slice();
   }
   select(images,jobs,fadeMs) {
     const resources=this.load(images,jobs);
