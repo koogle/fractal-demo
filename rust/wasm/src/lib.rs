@@ -1,3 +1,5 @@
+mod render_plan;
+mod scene3d;
 // Rust owns the WGSL source, camera state, and animated palette.
 const SHADER: &str = include_str!("demo.wgsl");
 const CACHE_EXTENT: f64 = 1.25; // 12.5% of the viewport beyond each edge.

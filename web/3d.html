@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d19"><title>Fractal Demo — 3D Mandelbulb</title><link rel="stylesheet" href="./style.css"></head>
+<body>
+<nav class="view-tabs" aria-label="Fractal views"><a href="./index.html">2D fractals</a><a href="./3d.html" aria-current="page">3D Mandelbulb</a></nav>
+<canvas id="canvas" aria-label="Interactive 3D Mandelbulb rendered by a Rust-controlled WebGPU ray marcher"></canvas>
+<fieldset id="controls" disabled><legend>3D Mandelbulb</legend>
+<p class="gesture-help">Drag to orbit · Shift-drag to pan · Scroll or pinch to move closer</p>
+<div class="parameters">
+<label for="power">Bulb power <output id="power-value">8</output></label><input id="power" type="range" min="2" max="12" step="1" value="8">
+<label for="detail">Fractal detail <output id="detail-value">12</output></label><input id="detail" type="range" min="6" max="24" step="1" value="12">
+</div>
+<div class="buttons" role="group" aria-label="3D camera controls">
+<button id="orbit" aria-pressed="true">Orbit drag</button><button id="pan" aria-pressed="false">Pan drag</button>
+<button id="closer">Move closer</button><button id="farther">Move back</button><button id="reset">Reset view</button><button id="light" aria-pressed="true">Pause light</button>
+</div><p id="render-status" class="gesture-help" role="status">Starting WebGPU…</p>
+</fieldset>
+<p id="error" role="alert" hidden></p><noscript>This demo requires JavaScript and WebGPU.</noscript>
+<script type="module" src="./scene3d.js"></script></body></html>

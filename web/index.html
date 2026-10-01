@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
+    <nav class="view-tabs" aria-label="Fractal views"><a href="./index.html" aria-current="page">2D fractals</a><a href="./3d.html">3D Mandelbulb</a></nav>
     <canvas id="canvas" aria-label="Mandelbrot fractal rendered by a Rust-controlled WebGPU shader"></canvas>
     <fieldset id="controls" disabled>
       <legend>Mandelbrot</legend>
@@ -41,6 +42,6 @@
     </fieldset>
     <p id="error" role="alert" hidden></p>
     <noscript>This demo requires JavaScript and WebGPU.</noscript>
-    <script type="module" src="./src.js"></script>
+    <script type="module" src="./src.js?v=zoom-out-2"></script>
   </body>
 </html>

@@ -10,6 +10,28 @@ fractal's home view. Julia uses c = -0.8 + 0.156i. `reset_view` and `explore_det
 respect the selected fractal. `drag`, `pan`, `zoom`, and pointer-anchored `zoom_at`
 operate on the same f64 camera for all algorithms.
 
+## Render planning in Rust
+
+`render_plan.rs` owns 2D rendering policy: predicted zoom targets, coverage checks,
+completed-cache selection, base/detail transitions, job priorities, protected LRU
+eviction, and adaptive tile budgets. `web/render-plan.mjs` marshals metadata and
+resolves returned IDs to browser resources. `web/src.js` continues to create and
+destroy textures, submit GPU commands, and handle browser input. Diagnostics stay
+in JavaScript. This migration does not change the 3D renderer.
+
+The planner input is a bounded array of 128 records, each containing 16 f64s:
+ID, camera x/y/scale, visible height, texture width/height, complete flag,
+active-job flag, next tile, total tiles, texture bytes, last-used time,
+completion time, and two reserved values. IDs start at 1; zero means no image.
+JavaScript checks capacity before copying. The dimensions and timestamps keep
+existing units (pixels and milliseconds); camera coordinates retain f64 precision.
+
+The selection output contains base ID, detail ID, transition start, job count,
+and ordered job IDs. Target output contains count, zoom direction, and camera
+triples. Eviction output contains count followed by IDs. Results are copied before
+the next planner call because they share one output buffer. Settings changes reset
+the planner along with the browser cache. No WebGPU handles cross into WASM.
+
 ## GPU data
 
 `update_frame` returns a WASM pointer; `uniform_size` reports 96 bytes. The six
@@ -31,7 +53,7 @@ padding is rounded up independently on each edge. The compute and repair shaders
 use the same `pixel_offset` function, subtracting padding before mapping visible
 pixels to world coordinates. Padding never multiplies the camera scale.
 
-`camera_ptr` returns center x/y and scale as three f64 values. A separate 48-byte
+`camera_ptr` returns center x/y and scale as three f64 values. A separate 64-byte
 reprojection uniform contains the current image transform, transition timing, and
 visible dimensions. Camera differences are calculated before conversion to f32.
 The display maps onto the center of each padded texture using its visible pixel
@@ -60,8 +82,8 @@ repair queue. `prepare_repairs` writes indirect dispatch arguments;
 Julia path initializes z from the pixel and uses the fixed Julia constant;
 Burning Ship uses the absolute real/imaginary components before squaring.
 The visible center tiles are scheduled before the offscreen margin. The total
-batch across jobs adapts toward 12 ms during gestures and 24 ms at rest, capped
-at 1,023 tiles or the device storage/indirect-dispatch limits. GPU workgroups execute
+batch across jobs adapts toward 8 ms during gestures and 12 ms at rest, capped
+at 256/512 tiles respectively, or the smaller device limits. GPU workgroups execute
 parallel pixel calculations; job batches share one bounded submission.
 
 `set_zoom_level`, `set_iterations`, `set_color_density`, and `set_color_speed`
@@ -103,7 +125,7 @@ between compute batches without building a queue of stale views.
 The display pipeline uses source-alpha blending. Each image has a four-byte
 arrival timestamp per 64×64 tile, written by compute binding 10 and read through
 fragment binding 9. Compute snapshots use `fractal.w` for the batch timestamp.
-The 48-byte reprojection block reuses its second vec4 for display time, layer
+The 64-byte reprojection block reuses its second vec4 for display time, layer
 appearance time, fade duration, and a reserved field. The shader fades each tile
 for 140 ms from the later of its arrival and layer appearance. The bottom layer
 is opaque, and coarser covering images stay until the replacement has fully
@@ -122,3 +144,9 @@ black fringes. A bounded 2×2 footprint filter handles moderate minification;
 this is not a full mip pyramid or arbitrary-scale anti-aliasing. The detail
 rectangle is feathered over eight display pixels. The final color is converted
 to straight alpha for the display pipeline's source-alpha blend.
+
+The fourth reprojection vec4 stores the old base rectangle in screen pixels
+(left, top, right, bottom). Detail alpha is opaque beyond that rectangle and
+blended within it, so zooming out does not fade newly revealed pixels from black.
+Completed wider details are promoted after their fade even if continued zoom-out
+has overtaken their bounds; this avoids reverting to the smaller prior base.

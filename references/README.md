@@ -40,3 +40,7 @@ state rather than importing the reference application's frontend or dependencies
 
 - [Wolfram: JuliaSetPlot](https://reference.wolfram.com/language/ref/JuliaSetPlot.html): quadratic Julia sets hold c fixed and vary the starting z. The demo uses c = -0.8 + 0.156i.
 - [mathr: abs variations](https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html#abs-variations): Burning Ship squares the complex value formed from the absolute real and imaginary components, then adds the pixel coordinate. The demo uses direct iteration and Q8.56 at deep zooms.
+
+## 3D Mandelbulb
+
+- [Paul Bourke: Mandelbulb set](https://paulbourke.org/fractals/bulb/): the White/Nylander spherical-coordinate power construction. The 3D demo implements its own WGSL distance estimator and ray marcher, with a Rust-owned orbit/pan/dolly camera.
