@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "samples": 390,
+  "dropped": 0,
+  "events": {
+    "jobsCreated": 160,
+    "jobsCompleted": 62,
+    "jobsRetired": 96,
+    "retiredTiles": 4603,
+    "evictions": 110
+  },
+  "summary": {
+    "queueMsP50": 2,
+    "queueMsP95": 21.700000017881393,
+    "jobLatencyMsP95": 153,
+    "tilesPerSecond": 15743.875106304135,
+    "frameGapMsP95": 22.300000005960555,
+    "maxLayers": 2,
+    "peakTextureMiB": 962.158203125,
+    "sharpFrameFraction": 0.06666666666666667,
+    "staleDetailFrames": 0,
+    "completedCacheHitFraction": 0.5230769230769231
+  },
+  "metadata": {
+    "width": 1600,
+    "height": 900,
+    "dpr": 1,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+    "iterations": 384,
+    "textureBudgetBytes": 1073741824,
+    "maxJobs": 8,
+    "maxTileBatch": 1023,
+    "fadeMs": 140,
+    "fractal": "mandelbrot",
+    "palettePaused": true,
+    "stressRound": 1,
+    "continuous": false,
+    "seed": 20261001
+  },
+  "scenario": "random-navigation-v1-round-1",
+  "checks": [
+    {
+      "name": "cold start",
+      "pass": true,
+      "settleMs": 98.40000000596046,
+      "target": 1
+    },
+    {
+      "name": "random checkpoint 4",
+      "pass": true,
+      "settleMs": 190.40000000596046,
+      "target": 20000
+    },
+    {
+      "name": "random checkpoint 8",
+      "pass": true,
+      "settleMs": 142.5,
+      "target": 20000
+    },
+    {
+      "name": "random checkpoint 12",
+      "pass": true,
+      "settleMs": 125,
+      "target": 20000
+    },
+    {
+      "name": "random checkpoint 16",
+      "pass": true,
+      "settleMs": 132.5,
+      "target": 20000
+    },
+    {
+      "name": "random zoom out recovers",
+      "pass": true,
+      "settleMs": 524.8000000119209,
+      "target": 1
+    },
+    {
+      "name": "no orphaned detail selected",
+      "pass": true
+    },
+    {
+      "name": "at most two display layers",
+      "pass": true
+    },
+    {
+      "name": "texture budget respected",
+      "pass": true
+    }
+  ],
+  "pass": true
+}

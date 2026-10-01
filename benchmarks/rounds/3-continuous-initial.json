@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "samples": 1381,
+  "dropped": 0,
+  "events": {
+    "jobsCreated": 1761,
+    "jobsCompleted": 226,
+    "jobsRetired": 1533,
+    "retiredTiles": 38457,
+    "evictions": 1711
+  },
+  "summary": {
+    "queueMsP50": 3.800000011920929,
+    "queueMsP95": 19.5,
+    "jobLatencyMsP95": 133,
+    "tilesPerSecond": 17057.0148378157,
+    "frameGapMsP95": 19.600000023841858,
+    "maxLayers": 2,
+    "peakTextureMiB": 962.158203125,
+    "sharpFrameFraction": 0.04055032585083273,
+    "staleDetailFrames": 0,
+    "completedCacheHitFraction": 0.4496741491672701
+  },
+  "metadata": {
+    "width": 1600,
+    "height": 900,
+    "dpr": 1,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+    "iterations": 384,
+    "textureBudgetBytes": 1073741824,
+    "maxJobs": 8,
+    "maxTileBatch": 1023,
+    "fadeMs": 140,
+    "fractal": "mandelbrot",
+    "palettePaused": true,
+    "stressRound": 3,
+    "continuous": true,
+    "seed": 20261001
+  },
+  "scenario": "random-navigation-v1-round-3-continuous",
+  "checks": [
+    {
+      "name": "cold start",
+      "pass": true,
+      "settleMs": 62.20000001788139,
+      "target": 1
+    },
+    {
+      "name": "random checkpoint 4",
+      "pass": true,
+      "settleMs": 384,
+      "target": 2000000
+    },
+    {
+      "name": "random checkpoint 8",
+      "pass": true,
+      "settleMs": 224.7999999821186,
+      "target": 2000000
+    },
+    {
+      "name": "random checkpoint 12",
+      "pass": true,
+      "settleMs": 241.89999997615814,
+      "target": 2000000
+    },
+    {
+      "name": "random checkpoint 16",
+      "pass": true,
+      "settleMs": 407.69999998807907,
+      "target": 2000000
+    },
+    {
+      "name": "random checkpoint 20",
+      "pass": true,
+      "settleMs": 382.59999999403954,
+      "target": 2000000
+    },
+    {
+      "name": "random checkpoint 24",
+      "pass": true,
+      "settleMs": 199.80000001192093,
+      "target": 2000000
+    },
+    {
+      "name": "random zoom out recovers",
+      "pass": true,
+      "settleMs": 194.80000001192093,
+      "target": 1
+    },
+    {
+      "name": "no orphaned detail selected",
+      "pass": true
+    },
+    {
+      "name": "at most two display layers",
+      "pass": true
+    },
+    {
+      "name": "texture budget respected",
+      "pass": true
+    }
+  ],
+  "pass": true
+}

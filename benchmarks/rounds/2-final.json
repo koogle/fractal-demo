@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "samples": 476,
+  "dropped": 0,
+  "events": {
+    "jobsCreated": 196,
+    "jobsCompleted": 91,
+    "jobsRetired": 105,
+    "retiredTiles": 3340,
+    "evictions": 148
+  },
+  "summary": {
+    "queueMsP50": 2,
+    "queueMsP95": 13.5,
+    "jobLatencyMsP95": 123.90000000596046,
+    "tilesPerSecond": 21240.380952380954,
+    "frameGapMsP95": 13.800000011920929,
+    "maxLayers": 2,
+    "peakTextureMiB": 962.158203125,
+    "sharpFrameFraction": 0.07142857142857142,
+    "staleDetailFrames": 0,
+    "completedCacheHitFraction": 0.5819327731092437
+  },
+  "metadata": {
+    "width": 1600,
+    "height": 900,
+    "dpr": 1,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+    "iterations": 384,
+    "textureBudgetBytes": 1073741824,
+    "maxJobs": 8,
+    "maxTileBatch": 1023,
+    "fadeMs": 140,
+    "fractal": "mandelbrot",
+    "palettePaused": true,
+    "stressRound": 2,
+    "continuous": false,
+    "seed": 20261001
+  },
+  "scenario": "random-navigation-v1-round-2",
+  "checks": [
+    {
+      "name": "cold start",
+      "pass": true,
+      "settleMs": 60.69999998807907,
+      "target": 1
+    },
+    {
+      "name": "random checkpoint 4",
+      "pass": true,
+      "settleMs": 174.40000000596046,
+      "target": 200000
+    },
+    {
+      "name": "random checkpoint 8",
+      "pass": true,
+      "settleMs": 141.60000002384186,
+      "target": 200000
+    },
+    {
+      "name": "random checkpoint 12",
+      "pass": true,
+      "settleMs": 125.09999999403954,
+      "target": 200000
+    },
+    {
+      "name": "random checkpoint 16",
+      "pass": true,
+      "settleMs": 116.69999998807907,
+      "target": 200000
+    },
+    {
+      "name": "random checkpoint 20",
+      "pass": true,
+      "settleMs": 141.59999999403954,
+      "target": 200000
+    },
+    {
+      "name": "random zoom out recovers",
+      "pass": true,
+      "settleMs": 207.5,
+      "target": 1
+    },
+    {
+      "name": "no orphaned detail selected",
+      "pass": true
+    },
+    {
+      "name": "at most two display layers",
+      "pass": true
+    },
+    {
+      "name": "texture budget respected",
+      "pass": true
+    }
+  ],
+  "pass": true
+}
