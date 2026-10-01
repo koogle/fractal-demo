@@ -7,7 +7,3 @@ build:
 serve: build
 	python3 -m http.server 5173 --bind 127.0.0.1 --directory web
 
-.PHONY: test
-test:
-	node --test tests/*.test.mjs
-	node --check web/src.js

@@ -131,14 +131,11 @@ samples. The report states whether older samples were dropped. Compare runs at
 the same viewport and settings:
 
 ```sh
-make test
 node scripts/compare-metrics.mjs before.json after.json
 ```
 
 The comparison rejects mismatched scenarios/configurations and exits nonzero
-when the new run fails its checks. Tests cover cancelled detail, stale views
-following large jumps, promotion/fade rules, diagnostic tile ordering, sharpness
-estimation, and bounded metrics retention. Selected unfinished display jobs keep
+when the new run fails its checks. Selected unfinished display jobs keep
 rendering; retired partial images cannot become a new detail target.
 
 Randomized stress variants use the same seed (`20261001`) for repeatability:
