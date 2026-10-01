@@ -32,7 +32,7 @@ triples. Eviction output contains count followed by IDs. Results are copied befo
 the next planner call because they share one output buffer. Settings changes reset
 the planner along with the browser cache. No WebGPU handles cross into WASM. Scheduling returns retirement IDs and requested
 camera triples; predicted allocations participate in subsequent coverage decisions.
-Reprojection is a separate 16-f32 output matching the GPU's 64-byte layout.
+Reprojection is a separate 16-f32 output matching the GPU's 64-byte layout, including the old base bounds.
 
 After `make build`, run `node scripts/check-render-plan.mjs` to compare the real
 WASM planner against the pre-migration JavaScript retained in git at `5e71a6e`.

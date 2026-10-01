@@ -505,6 +505,24 @@ pub extern "C" fn planner_reprojection(id: u32, layer: u32, fade_ms: f64) -> *co
             values[9] = i.height as f32;
             values[10] = i.width as f32;
             values[11] = i.height as f32;
+            // Match the overlap fix: fade only where the previous base exists.
+            if let Some(base) = p.image(p.base) {
+                let ratio = p.camera[2] / base.camera[2];
+                let shift = [
+                    (p.camera[0] - base.camera[0]) / base.camera[2],
+                    -(p.camera[1] - base.camera[1]) / base.camera[2],
+                ];
+                for (edge, sign) in [-1.0, 1.0].iter().enumerate() {
+                    values[12 + edge * 2] =
+                        (((sign * base.texture[0] / base.height - shift[0]) / ratio * p.height
+                            + p.width)
+                            / 2.0) as f32;
+                    values[13 + edge * 2] =
+                        (((sign * base.texture[1] / base.height - shift[1]) / ratio * p.height
+                            + p.height)
+                            / 2.0) as f32;
+                }
+            }
         }
         // Crossfade only over the old base; reveal uncovered zoom-out edges opaque.
         if let Some(base) = p.image(p.base) {

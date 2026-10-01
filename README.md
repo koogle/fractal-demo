@@ -27,7 +27,6 @@ Serve the contents of `web/` on a static host, including the generated
 `fractal.wasm` file. Configure `.wasm` responses as `application/wasm`.
 
 See [references](references/README.md) for shader and WebGPU implementation notes.
-te-coverage request.
 
 ## Renderer metrics and regression benchmark
 
