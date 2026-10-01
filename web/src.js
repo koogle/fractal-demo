@@ -1,4 +1,5 @@
-import { selectPair, coverage, Metrics } from './render-health.mjs';
+import { coverage, Metrics } from './render-health.mjs';
+import { RenderPlanner } from './render-plan.mjs';
 const canvas = document.querySelector('#canvas');
 const errorElement = document.querySelector('#error');
 const controls = document.querySelector('#controls');
@@ -18,6 +19,7 @@ async function start() {
   if (!response.ok) throw new Error(`Could not load the Rust library (${response.status}). Run make build.`);
   const { instance } = await WebAssembly.instantiateStreaming(response, {});
   const rust = instance.exports;
+  const planner = new RenderPlanner(rust);
   const shader = new TextDecoder().decode(
     new Uint8Array(rust.memory.buffer, rust.shader_ptr(), rust.shader_len()),
   );
@@ -85,10 +87,9 @@ async function start() {
   const repairPixels = device.createBuffer({ size: maxTileBatch * 64 * 64 * 8, usage: GPUBufferUsage.STORAGE });
   let activeSettings = '', tileBatch = Math.min(128, maxTileBatch);
   const fadeSeconds = 0.14;
-  let nextImageId = 0;
+  let nextImageId = 1; // Zero is the Rust planner’s “no image” sentinel.
   let displayBase, displayDetail, detailSince = 0;
   let interactiveUntil = 0;
-  let previousZoomSample, zoomRate = 0;
   let zoomDirection = 0.7, zoomAnchor = [0, 0];
   function interacting() { lastInputAt = performance.now(); interactiveUntil = lastInputAt + 180; }
   function releaseJobBuffers(job) {
@@ -112,24 +113,16 @@ async function start() {
     job.texture.destroy(); job.tileTimes.destroy(); job.reprojection.destroy(); releaseJobBuffers(job);
   }
   function fits(image, camera, width, height, maxMagnification = Infinity) {
-    const ratio = camera[2] / image.camera[2];
-    const dx = Math.abs((camera[0] - image.camera[0]) / image.camera[2]);
-    const dy = Math.abs((camera[1] - image.camera[1]) / image.camera[2]);
-    return dx + width / height * ratio <= image.texture.width / image.geometry[1] &&
-      dy + ratio <= image.texture.height / image.geometry[1] &&
-      height / (image.geometry[1] * ratio) <= maxMagnification;
+    return planner.fits(image, camera, width, height, maxMagnification);
   }
   function trimImages(reserved, protectedImage) {
-    let bytes = images.reduce((sum, image) => sum + image.bytes, reserved);
-    while (images.length && (bytes > memoryBudget || images.length > maxCachedImages)) {
-      const oldest = images.filter(image => image !== protectedImage && image !== displayBase && image !== displayDetail).sort((a, b) => a.used - b.used)[0];
-      if (!oldest) break;
-      images.splice(images.indexOf(oldest), 1);
-      bytes -= oldest.bytes;
+    for (const image of planner.evictions(images, reserved, memoryBudget, maxCachedImages, protectedImage)) {
+      images.splice(images.indexOf(image), 1);
       metrics?.event('evictions');
-      oldest.texture.destroy(); oldest.tileTimes.destroy(); oldest.reprojection.destroy();
+      image.texture.destroy(); image.tileTimes.destroy(); image.reprojection.destroy();
     }
   }
+
   function createJob(camera, width, height, speculative, displayed, extent) {
     const visibleWidth = width, visibleHeight = height;
     const padX = Math.ceil(width * (extent - 1) / 2), padY = Math.ceil(height * (extent - 1) / 2);
@@ -316,34 +309,15 @@ async function start() {
       if (settings !== activeSettings) {
         [...jobs].forEach(disposeJob);
         images.splice(0).forEach(image => { image.texture.destroy(); image.tileTimes.destroy(); image.reprojection.destroy(); });
-        previousZoomSample = undefined; zoomRate = 0;
+        planner.reset();
         displayBase = displayDetail = undefined;
         activeSettings = settings;
       }
-      const candidates = images.filter(image => image.complete && fits(image, exactCamera, width, height));
-      // Prefer the highest usable pixel density, not the closest camera scale.
-      const pixelSize = image => image.camera[2] / image.geometry[1];
-      candidates.sort((a, b) => pixelSize(a) - pixelSize(b));
-      const ready = candidates.find(image => fits(image, exactCamera, width, height, 1.05));
-      const displayed = ready ?? candidates[0] ?? images.at(-1);
+      const {ready, displayed} = planner.cached(images, exactCamera, width, height, now);
       if (displayed) displayed.used = now;
-      if (previousZoomSample) {
-        const seconds = Math.max(0.001, (now - previousZoomSample.time) / 1000);
-        const rate = Math.log(previousZoomSample.scale / exactCamera[2]) / seconds;
-        zoomRate = 0.65 * zoomRate + 0.35 * Math.max(-8, Math.min(8, rate));
-        if (Math.abs(rate) > 0.01) zoomDirection = rate > 0 ? 0.7 : 1 / 0.7;
-      }
-      previousZoomSample = { scale: exactCamera[2], time: now };
-      const direction = zoomDirection < 1 ? 1 : -1;
-      // Faster gestures spread eight views further along the zoom trajectory.
-      const step = Math.exp(-Math.max(0.16, Math.min(0.42, Math.abs(zoomRate) * 0.12)));
-      const factors = moving ? Array.from({ length: maxJobs }, (_, i) => step ** (i * direction)) :
-        [...Array.from({ length: maxJobs - 1 }, (_, i) => 0.82 ** (i * direction)), 0.82 ** -direction];
-      const targets = factors.map(factor => {
-        const nextScale = exactCamera[2] * factor;
-        return [exactCamera[0] + zoomAnchor[0] * (exactCamera[2] - nextScale),
-          exactCamera[1] + zoomAnchor[1] * (exactCamera[2] - nextScale), nextScale];
-      }).filter(camera => camera.every(Number.isFinite) && camera[2] > 0);
+      const prediction = planner.targets(exactCamera, now, moving, zoomAnchor, zoomDirection, maxJobs);
+      const targets = prediction.targets;
+      zoomDirection = prediction.direction;
       // Keep work that still covers the trajectory instead of restarting it
       // on every wheel event. At most eight independent views are in progress.
       for (const job of [...jobs]) {
@@ -356,20 +330,9 @@ async function start() {
         const job = createJob(camera, width, height, index !== 0, displayed, extent);
         if (job) jobs.push(job);
       }
-      jobs.sort((a, b) => {
-        const score = job => (fits(job, exactCamera, width, height, 1.25) ? 0 : 10) +
-          Math.abs(Math.log(job.camera[2] / exactCamera[2])) - job.nextTile / job.totalTiles;
-        return score(a) - score(b);
-      });
-      ({base: displayBase, detail: displayDetail, since: detailSince} = selectPair({
-        base:displayBase, detail:displayDetail, since:detailSince, images, jobs,
-        camera:exactCamera, width, height, now, fadeMs:fadeSeconds*1000, fits,
-      }));
-      // Finish the visible replacement before spending most of the batch on predictions.
-      const urgent = displayDetail ?? displayBase;
-      if (urgent && jobs.includes(urgent) && fits(urgent, exactCamera, width, height, 1.05)) {
-        jobs.splice(jobs.indexOf(urgent), 1); jobs.unshift(urgent);
-      }
+      const selection = planner.select(images, jobs, fadeSeconds * 1000);
+      displayBase = selection.base; displayDetail = selection.detail; detailSince = selection.since;
+      jobs.splice(0, jobs.length, ...selection.jobs);
       const layers = displayDetail ? [displayBase, displayDetail] : [displayBase];
       for (const [index, image] of layers.entries()) {
         image.used = now;
@@ -386,7 +349,7 @@ async function start() {
       const batches = [];
       // Bound sudden cost changes after a jump; cheap cached views must not
       // grow the next expensive submission into a long input stall.
-      let remainingTiles = Math.min(tileBatch, moving ? 256 : 512);
+      let remainingTiles = rust.planner_batch_limit(tileBatch, Number(moving));
       for (const [index, job] of jobs.entries()) {
         if (!remainingTiles) break;
         const computeFrame = job.frame.slice();
@@ -398,8 +361,7 @@ async function start() {
         computeFloats[23] = now / 1000; // Arrival time for this batch of tiles.
         computeFloats.set([job.geometry[2], job.geometry[3], job.geometry[0], job.geometry[1]], 16);
         device.queue.writeBuffer(job.computeUniforms, 0, computeFrame);
-        const share = index === jobs.length - 1 ? remainingTiles :
-          Math.max(1, Math.min(remainingTiles - (jobs.length - index - 1), Math.ceil(remainingTiles * (!ready && index === 0 ? 0.85 : 0.55))));
+        const share = rust.planner_batch_share(remainingTiles, index, jobs.length, Number(Boolean(ready)));
         const batch = Math.min(share, job.totalTiles - job.nextTile);
         remainingTiles -= batch;
         batches.push({ job, batch });
@@ -444,9 +406,7 @@ async function start() {
       if (batches.length) {
         const elapsed = performance.now() - submitted;
         const submittedTiles = batches.reduce((sum, item) => sum + item.batch, 0);
-        const targetMilliseconds = moving ? 8 : 12;
-        tileBatch = Math.max(maxJobs, Math.min(maxTileBatch,
-          Math.floor(submittedTiles * Math.min(1.25, targetMilliseconds / Math.max(1, elapsed)))));
+        tileBatch = rust.planner_tune_batch(submittedTiles, elapsed, Number(moving), maxJobs, maxTileBatch);
         for (const { job } of batches) {
           if (job.nextTile >= job.totalTiles) {
             jobs.splice(jobs.indexOf(job), 1);

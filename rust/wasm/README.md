@@ -10,6 +10,28 @@ fractal's home view. Julia uses c = -0.8 + 0.156i. `reset_view` and `explore_det
 respect the selected fractal. `drag`, `pan`, `zoom`, and pointer-anchored `zoom_at`
 operate on the same f64 camera for all algorithms.
 
+## Render planning in Rust
+
+`render_plan.rs` owns 2D rendering policy: predicted zoom targets, coverage checks,
+completed-cache selection, base/detail transitions, job priorities, protected LRU
+eviction, and adaptive tile budgets. `web/render-plan.mjs` marshals metadata and
+resolves returned IDs to browser resources. `web/src.js` continues to create and
+destroy textures, submit GPU commands, and handle browser input. Diagnostics stay
+in JavaScript. This migration does not change the 3D renderer.
+
+The planner input is a bounded array of 128 records, each containing 16 f64s:
+ID, camera x/y/scale, visible height, texture width/height, complete flag,
+active-job flag, next tile, total tiles, texture bytes, last-used time,
+completion time, and two reserved values. IDs start at 1; zero means no image.
+JavaScript checks capacity before copying. The dimensions and timestamps keep
+existing units (pixels and milliseconds); camera coordinates retain f64 precision.
+
+The selection output contains base ID, detail ID, transition start, job count,
+and ordered job IDs. Target output contains count, zoom direction, and camera
+triples. Eviction output contains count followed by IDs. Results are copied before
+the next planner call because they share one output buffer. Settings changes reset
+the planner along with the browser cache. No WebGPU handles cross into WASM.
+
 ## GPU data
 
 `update_frame` returns a WASM pointer; `uniform_size` reports 96 bytes. The six
@@ -60,8 +82,8 @@ repair queue. `prepare_repairs` writes indirect dispatch arguments;
 Julia path initializes z from the pixel and uses the fixed Julia constant;
 Burning Ship uses the absolute real/imaginary components before squaring.
 The visible center tiles are scheduled before the offscreen margin. The total
-batch across jobs adapts toward 12 ms during gestures and 24 ms at rest, capped
-at 1,023 tiles or the device storage/indirect-dispatch limits. GPU workgroups execute
+batch across jobs adapts toward 8 ms during gestures and 12 ms at rest, capped
+at 256/512 tiles respectively, or the smaller device limits. GPU workgroups execute
 parallel pixel calculations; job batches share one bounded submission.
 
 `set_zoom_level`, `set_iterations`, `set_color_density`, and `set_color_speed`

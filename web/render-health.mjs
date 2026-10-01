@@ -1,33 +1,3 @@
-export function selectPair({base, detail, since, images, jobs, camera, width, height, now, fadeMs, fits}) {
-  const pitch = image => image.camera[2] / image.geometry[1];
-  const current = camera[2] / height;
-  const available = [...images.filter(image => image.complete), ...jobs];
-  const intersects = image => {
-    const ratio = camera[2] / image.camera[2];
-    return Math.abs((camera[0] - image.camera[0]) / image.camera[2]) < image.texture.width / image.geometry[1] + width / height * ratio &&
-      Math.abs((camera[1] - image.camera[1]) / image.camera[2]) < image.texture.height / image.geometry[1] + ratio;
-  };
-  const score = image => Math.abs(Math.log(pitch(image) / current)) + (fits(image, camera, width, height) ? 0 : 1) + (image.complete ? 0 : 0.15);
-  const covering = available.filter(image => image.complete && fits(image, camera, width, height));
-  if (!base) base = covering.sort((a,b) => score(a)-score(b))[0] ?? jobs[0];
-  // A cancelled partial texture cannot finish. Never lock the display onto it.
-  if (detail && (!available.includes(detail) || !intersects(detail))) detail = undefined;
-  const better = available.filter(image => image !== base && intersects(image)).sort((a,b) => score(a)-score(b) || a.id-b.id);
-  if (detail && pitch(detail) / current > 1.5 && better.some(image => pitch(image) < pitch(detail) * 0.8)) detail = undefined;
-  if (detail?.complete && fits(detail, camera, width, height) && now-Math.max(since, detail.completedAt) >= fadeMs) {
-    base = detail; detail = undefined;
-  }
-  if (detail && now-since > fadeMs && covering.some(image => image !== base && fits(image,camera,width,height,1.05)) && !fits(detail,camera,width,height)) detail = undefined;
-  if (!detail && base) {
-    const basePitch = pitch(base);
-    const next = better.find(image => image !== base &&
-      (pitch(image) < basePitch * 0.92 || !fits(base,camera,width,height) ||
-        (basePitch < current * 0.65 && score(image)+0.15 < score(base))));
-    if (next && (!fits(base,camera,width,height,1.05) || basePitch < current*0.65)) { detail=next; since=now; }
-  }
-  return {base,detail,since};
-}
-
 // Mirrors cache_tile ordering in WGSL. Used only for diagnostic sampling.
 export function tileIndex(x, y, image) {
   const gx=Math.ceil(image.texture.width/64), gy=Math.ceil(image.texture.height/64);
