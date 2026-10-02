@@ -14,8 +14,21 @@ export class RenderPlanner {
       image.bytes,image.used,image.completedAt??0,image.geometry[0],0,
     ],index*16);
     this.rust.planner_load(resources.length,...camera,width,height,now);
-    return new Map(resources.map(image=>[image.id,image]));
+    this.resources=new Map(resources.map(image=>[image.id,image]));
+    return this.resources;
   }
+  allocation(images,jobs,bytes,budget,limit,protectedImage) {
+    const resources=this.load(images,jobs);
+    const pointer=this.rust.planner_allocation(bytes,budget,limit,protectedImage?.id??0);
+    const [allowed,count]=this.read(pointer,2);
+    return {allowed:Boolean(allowed),evicted:Array.from(this.read(pointer+16,count),id=>resources.get(id))};
+  }
+  completed() {
+    const pointer=this.rust.planner_completed();
+    const [count]=this.read(pointer,1);
+    return Array.from(this.read(pointer+8,count),id=>this.resources.get(id));
+  }
+  bytes(images,jobs) { this.load(images,jobs);return this.rust.planner_bytes(0); }
   reset() { this.rust.planner_reset(); }
   fits(image,camera,width,height,max=Infinity) {
     return Boolean(this.rust.planner_fits(...image.camera,image.geometry[1],image.texture.width,image.texture.height,...camera,width,height,max));

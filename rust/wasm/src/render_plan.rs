@@ -505,24 +505,6 @@ pub extern "C" fn planner_reprojection(id: u32, layer: u32, fade_ms: f64) -> *co
             values[9] = i.height as f32;
             values[10] = i.width as f32;
             values[11] = i.height as f32;
-            // Match the overlap fix: fade only where the previous base exists.
-            if let Some(base) = p.image(p.base) {
-                let ratio = p.camera[2] / base.camera[2];
-                let shift = [
-                    (p.camera[0] - base.camera[0]) / base.camera[2],
-                    -(p.camera[1] - base.camera[1]) / base.camera[2],
-                ];
-                for (edge, sign) in [-1.0, 1.0].iter().enumerate() {
-                    values[12 + edge * 2] =
-                        (((sign * base.texture[0] / base.height - shift[0]) / ratio * p.height
-                            + p.width)
-                            / 2.0) as f32;
-                    values[13 + edge * 2] =
-                        (((sign * base.texture[1] / base.height - shift[1]) / ratio * p.height
-                            + p.height)
-                            / 2.0) as f32;
-                }
-            }
         }
         // Crossfade only over the old base; reveal uncovered zoom-out edges opaque.
         if let Some(base) = p.image(p.base) {
@@ -547,4 +529,72 @@ pub extern "C" fn planner_reprojection(id: u32, layer: u32, fade_ms: f64) -> *co
         }
     });
     core::ptr::addr_of!(REPROJECTION).cast::<f32>()
+}
+
+// JS executes these lifecycle decisions only after GPU completion. Active and
+// cached allocations share one accounting snapshot, including retained partials.
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_bytes(active_only: u32) -> f64 {
+    PLAN.with(|p| {
+        p.borrow()
+            .images
+            .iter()
+            .filter(|i| active_only == 0 || i.active)
+            .map(|i| i.bytes)
+            .sum()
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_retirement(id: u32) -> u32 {
+    PLAN.with(|p| {
+        let p = p.borrow();
+        if id == p.base || id == p.detail {
+            return 0;
+        }
+        p.image(id).map_or(0, |i| if i.next == 0.0 { 1 } else { 2 })
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_completed() -> *const f64 {
+    PLAN.with(|p| {
+        let p = p.borrow();
+        let ids: Vec<_> = p
+            .images
+            .iter()
+            .filter(|i| i.active && i.next >= i.total)
+            .map(|i| i.id as f64)
+            .collect();
+        let mut values = vec![ids.len() as f64];
+        values.extend(ids);
+        output(&values)
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_batch_size(share: u32, next: u32, total: u32) -> u32 {
+    share.min(total.saturating_sub(next))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn planner_allocation(
+    bytes: f64,
+    budget: f64,
+    limit: u32,
+    protected: u32,
+) -> *const f64 {
+    let reserved = planner_bytes(1) + bytes;
+    let pointer = planner_evict(reserved, budget, limit, protected);
+    let count = unsafe { *pointer } as usize;
+    let evicted = unsafe { core::slice::from_raw_parts(pointer.add(1), count) }.to_vec();
+    let allowed = PLAN.with(|p| {
+        let p = p.borrow();
+        bytes
+            + p.images
+                .iter()
+                .filter(|i| !evicted.contains(&(i.id as f64)))
+                .map(|i| i.bytes)
+                .sum::<f64>()
+            <= budget
+    });
+    let mut values = vec![allowed as u32 as f64, count as f64];
+    values.extend(evicted);
+    output(&values)
 }

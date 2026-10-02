@@ -254,3 +254,126 @@ pub extern "C" fn scene3d_shader_ptr() -> *const u8 {
 pub extern "C" fn scene3d_shader_len() -> usize {
     SHADER.len()
 }
+
+// One submitted frame at a time. Browser callbacks supply clocks and viewport
+// measurements; all quality, invalidation and refresh decisions live here.
+struct Refresh {
+    revision: u64,
+    rendered: Option<u64>,
+    submitted: u64,
+    last_input: f64,
+    full: bool,
+    moving: bool,
+    resolution: f64,
+}
+thread_local! { static REFRESH: RefCell<Refresh> = const { RefCell::new(Refresh {
+    revision: 0, rendered: None, submitted: 0, last_input: f64::NEG_INFINITY,
+    full: false, moving: false, resolution: 720.0,
+}) }; }
+static mut RENDER_PLAN: [f64; 4] = [0.0; 4];
+#[unsafe(no_mangle)]
+pub extern "C" fn scene3d_invalidate(now: f64) {
+    REFRESH.with(|r| {
+        let mut r = r.borrow_mut();
+        r.revision += 1;
+        r.last_input = now;
+    });
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn scene3d_resume() {
+    REFRESH.with(|r| {
+        let mut r = r.borrow_mut();
+        r.full = false;
+        r.rendered = None;
+    });
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn scene3d_plan(
+    now: f64,
+    dragging: u32,
+    width: f64,
+    height: f64,
+    dpr: f64,
+    max_dimension: f64,
+) -> *const f64 {
+    let light = LIGHT.with(|l| l.borrow().enabled);
+    REFRESH.with(|r| {
+        let mut r = r.borrow_mut();
+        let moving = dragging != 0 || now - r.last_input < 160.0;
+        let needed = light || r.rendered != Some(r.revision) || (!r.full && !moving);
+        let limit = if moving {
+            r.resolution
+        } else if light {
+            1000.0
+        } else {
+            1400.0
+        };
+        let scale = dpr.min(limit / width.max(height).max(1.0));
+        if needed {
+            r.submitted = r.revision;
+            r.moving = moving;
+        }
+        unsafe {
+            RENDER_PLAN = [
+                needed as u32 as f64,
+                (width * scale).round().clamp(1.0, max_dimension),
+                (height * scale).round().clamp(1.0, max_dimension),
+                moving as u32 as f64,
+            ];
+        }
+    });
+    core::ptr::addr_of!(RENDER_PLAN).cast()
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn scene3d_finish(elapsed: f64) -> i32 {
+    let light = LIGHT.with(|l| l.borrow().enabled);
+    REFRESH.with(|r| {
+        let mut r = r.borrow_mut();
+        if r.moving {
+            r.resolution = (r.resolution * (20.0 / elapsed.max(1.0)).sqrt().clamp(0.8, 1.1))
+                .clamp(400.0, 960.0);
+        }
+        r.rendered = Some(r.submitted);
+        r.full = !r.moving;
+        if r.rendered != Some(r.revision) {
+            0
+        } else if light {
+            16
+        } else if !r.full {
+            180
+        } else {
+            -1
+        }
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn scene3d_wheel(dx: f64, dy: f64, mode: u32, shift: u32, pinch: u32, height: f64) {
+    if height <= 0.0 {
+        return;
+    }
+    let unit = match mode {
+        1 => 16.0,
+        2 => height,
+        _ => 1.0,
+    };
+    if shift != 0 && pinch == 0 {
+        scene3d_pan(if dx != 0.0 { dx } else { dy } * unit / height, 0.0);
+    } else {
+        scene3d_zoom(
+            (dy * unit * if pinch != 0 { 0.008 } else { 0.002 })
+                .clamp(-0.3, 0.3)
+                .exp(),
+        );
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn scene3d_drag(dx: f64, dy: f64, height: f64, pan: u32) {
+    if height <= 0.0 {
+        return;
+    }
+    if pan != 0 {
+        scene3d_pan(dx / height, dy / height);
+    } else {
+        scene3d_orbit(dx / height, dy / height);
+    }
+}

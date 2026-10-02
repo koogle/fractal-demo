@@ -111,3 +111,11 @@ These are approximate fractal distance estimates, not exact mesh collisions. Dis
 approximate, GPU arithmetic has finite precision, and zoom distance is bounded
 from 0.02 to 80 scene units. This 3D path does not offer arbitrary-depth precision
 or the 2D benchmark's performance guarantees. The model requires no asset downloads.
+
+## Rust runtime
+
+Rust owns camera/input math, 2D scheduling and cache decisions, shader uniform
+preparation, and 3D resolution/refresh policy. JavaScript bridges browser events,
+DOM controls, timers and WebGPU resource calls; the diagnostic harness remains
+JavaScript so it can independently observe the renderer. See
+[runtime documentation](rust/wasm/README.md) for the WASM interface and checks.

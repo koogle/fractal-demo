@@ -17,7 +17,7 @@ completed-cache selection, base/detail transitions, job priorities, protected LR
 eviction, job creation/retirement, reprojection uniforms, and adaptive tile budgets. `web/render-plan.mjs` marshals metadata and
 resolves returned IDs to browser resources. `web/src.js` continues to create and
 destroy textures, submit GPU commands, and handle browser input. Diagnostics stay
-in JavaScript. This migration does not change the 3D renderer.
+in JavaScript as independent instrumentation. Rust also owns the 3D refresh and quality state machine.
 
 The planner input is a bounded array of 128 records, each containing 16 f64s:
 ID, camera x/y/scale, visible height, texture width/height, complete flag,
@@ -35,11 +35,33 @@ camera triples; predicted allocations participate in subsequent coverage decisio
 Reprojection is a separate 16-f32 output matching the GPU's 64-byte layout, including the old base bounds.
 
 After `make build`, run `node scripts/check-render-plan.mjs` to compare the real
-WASM planner against the pre-migration JavaScript retained in git at `5e71a6e`.
+WASM planner against the pre-migration JavaScript retained in git at `5e71a6e`,
+with the later zoom-out promotion rule explicitly applied to that reference.
 It checks 6,000 seeded selection, priority, scheduling, eviction, and reprojection
 cases plus 96,000 coverage comparisons. The original git commit must be available
 (a shallow clone may need to fetch history). Browser benchmarks remain accessible
 through `?metrics=1`; no tests directory is required.
+
+## Runtime ownership
+
+`runtime.rs` chooses viewport dimensions, device-limited repair capacity, cache
+configuration, padded job geometry, settings invalidation, interaction timing,
+and wheel/drag coordinate conversion. `planner_allocation` accounts for active
+and cached textures together and returns permission plus eviction IDs. Rust
+chooses whether retired jobs are discarded or retained and which submitted jobs
+have completed. JS maintains the corresponding resource handles and executes
+those transitions after `onSubmittedWorkDone`.
+
+For 3D, `scene3d_plan` returns `[needed, width, height, moving]` as four f64s.
+`scene3d_invalidate` records input; `scene3d_finish` feeds GPU completion time back
+into resolution adaptation and returns the next delay in milliseconds: -1 sleeps,
+0 schedules immediately, otherwise a timer schedules the next frame. Revisions
+preserve input received while the GPU is busy. `scene3d_resume` invalidates a view
+after tab visibility changes. Browser scheduling and GPU handles remain in JS.
+
+Run `node scripts/check-runtime.mjs` after building to check 2,000 geometry,
+viewport and bit-exact uniform cases, 2,000 refresh cases, allocation/lifecycle,
+invalidation, navigation conversion, light animation and collision behavior.
 
 ## GPU data
 
@@ -56,8 +78,9 @@ through `?metrics=1`; no tests directory is required.
 | 80 | fractal | Algorithm ID, Julia c real/imaginary, reserved |
 
 JavaScript copies the snapshot to the display uniform. It retains an immutable
-snapshot for each cached view and fills its compute dimensions, tile index,
-reference length, and explicit cache geometry. `cache_extent` returns 1.25;
+snapshot for each cached view. `compute_input_ptr` accepts that snapshot as raw bytes;
+`compute_frame` fills its compute dimensions, tile index, reference length, timestamp,
+and cache geometry in Rust. Packed Q8.56 integer words are preserved bit for bit. `cache_extent` returns 1.25;
 padding is rounded up independently on each edge. The compute and repair shaders
 use the same `pixel_offset` function, subtracting padding before mapping visible
 pixels to world coordinates. Padding never multiplies the camera scale.

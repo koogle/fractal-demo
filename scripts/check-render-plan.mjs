@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {RenderPlanner} from '../web/render-plan.mjs';
-const source=execFileSync('git',['show','5e71a6e:web/render-health.mjs'],{encoding:'utf8'});
+let source=execFileSync('git',['show','5e71a6e:web/render-health.mjs'],{encoding:'utf8'});
+// The historical oracle predates the intentional zoom-out overlap fix. Apply
+// that single documented rule so this checks the current policy, not a rollback.
+const oldPromotion='detail?.complete && fits(detail, camera, width, height)';
+assert.ok(source.includes(oldPromotion));
+source=source.replace(oldPromotion,'detail?.complete && (fits(detail, camera, width, height) || (base && pitch(detail)>pitch(base) && !fits(base,camera,width,height)))');
 const {selectPair}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const {instance}=await WebAssembly.instantiate(readFileSync(new URL('../web/fractal.wasm',import.meta.url)),{});
 const planner=new RenderPlanner(instance.exports);

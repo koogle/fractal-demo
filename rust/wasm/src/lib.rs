@@ -1,5 +1,5 @@
-mod scene3d;
 mod render_plan;
+mod runtime;
 mod scene3d;
 // Rust owns the WGSL source, camera state, and animated palette.
 const SHADER: &str = include_str!("demo.wgsl");
@@ -330,11 +330,10 @@ pub extern "C" fn update_frame(width: f32, height: f32, seconds: f32) -> *const 
         // A fixed zoom threshold allowed different resolutions and centers to
         // lose different amounts of subpixel detail before perturbation began.
         let pixel_span = 2.0 * state.scale / f64::from(height.max(1.0));
-        let coordinate_error = f64::from(f32::EPSILON)
-            * (state.x.abs().max(state.y.abs()) + state.scale).max(1.0);
-        let precise = pixel_span < coordinate_error * 16.0
-            && state.x.abs() < 4.0
-            && state.y.abs() < 4.0;
+        let coordinate_error =
+            f64::from(f32::EPSILON) * (state.x.abs().max(state.y.abs()) + state.scale).max(1.0);
+        let precise =
+            pixel_span < coordinate_error * 16.0 && state.x.abs() < 4.0 && state.y.abs() < 4.0;
         let x = if precise {
             fixed_words(state.x)
         } else {

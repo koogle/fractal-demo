@@ -1,5 +1,5 @@
 import { coverage, Metrics } from './render-health.mjs';
-import { RenderPlanner } from './render-plan.mjs';
+import { RenderPlanner } from './render-plan.mjs?v=rust-runtime-2';
 const canvas = document.querySelector('#canvas');
 const errorElement = document.querySelector('#error');
 const controls = document.querySelector('#controls');
@@ -69,38 +69,32 @@ async function start() {
   });
   // Completed images are reusable across palette changes and camera gestures.
   // The budget includes retained textures and all active render targets.
-  const memoryBudget = 1024 * 1024 * 1024;
-  const maxJobs = 8;
-  const maxCachedImages = 48;
-  // Each tile can enqueue 4096 repairs, dispatched in groups of 64.
-  // Respect both storage size and the indirect dispatch dimension limit.
-  const maxTileBatch = Math.min(1023,
-    Math.floor(device.limits.maxStorageBufferBindingSize / (64 * 64 * 8)),
-    Math.floor(device.limits.maxBufferSize / (64 * 64 * 8)),
-    Math.floor(device.limits.maxComputeWorkgroupsPerDimension / 64));
+  const [memoryBudget,maxJobs,maxCachedImages,maxTileBatch,repairBytes,initialBatch,fadeMs] =
+    new Float64Array(rust.memory.buffer,rust.render_config(device.limits.maxStorageBufferBindingSize,
+      device.limits.maxBufferSize,device.limits.maxComputeWorkgroupsPerDimension),7).slice();
   const metricsEnabled = new URLSearchParams(location.search).has('metrics');
   const metrics = metricsEnabled ? new Metrics() : undefined;
   let lastFrameAt, lastInputAt;
   const images = [];
   const jobs = [];
   // Repair storage is reused by sequential repair passes, never by overlapping jobs.
-  const repairPixels = device.createBuffer({ size: maxTileBatch * 64 * 64 * 8, usage: GPUBufferUsage.STORAGE });
-  let activeSettings = '', tileBatch = Math.min(128, maxTileBatch);
-  const fadeSeconds = 0.14;
+  const repairPixels = device.createBuffer({ size: repairBytes, usage: GPUBufferUsage.STORAGE });
+  let tileBatch = initialBatch;
+  const fadeSeconds = fadeMs / 1000;
   let nextImageId = 1; // Zero is the Rust planner’s “no image” sentinel.
   let displayBase, displayDetail, detailSince = 0;
-  let interactiveUntil = 0;
   let zoomDirection = 0.7, zoomAnchor = [0, 0];
-  function interacting() { lastInputAt = performance.now(); interactiveUntil = lastInputAt + 180; }
+  function interacting() { lastInputAt = performance.now(); }
   function releaseJobBuffers(job) {
     job.computeUniforms.destroy(); job.referenceBuffer.destroy();
   }
   function retireJob(job) {
     // Selected jobs must finish unless selection explicitly replaces them.
-    if (job === displayBase || job === displayDetail) return;
+    const action=rust.planner_retirement(job.id);
+    if (!action) return;
     metrics?.event('jobsRetired');
     metrics?.event('retiredTiles',job.nextTile);
-    if (!job.nextTile && job !== displayBase && job !== displayDetail) { disposeJob(job); return; }
+    if (action===1) { disposeJob(job); return; }
     // Stop computing stale predictions, but retain pixels already on screen.
     // They remain fallback layers until sharper coverage makes them redundant.
     jobs.splice(jobs.indexOf(job), 1);
@@ -112,22 +106,25 @@ async function start() {
     jobs.splice(jobs.indexOf(job), 1);
     job.texture.destroy(); job.tileTimes.destroy(); job.reprojection.destroy(); releaseJobBuffers(job);
   }
-  function trimImages(reserved, protectedImage) {
-    for (const image of planner.evictions(images, reserved, memoryBudget, maxCachedImages, protectedImage)) {
+  function evictImages(evicted) {
+    for (const image of evicted) {
       images.splice(images.indexOf(image), 1);
       metrics?.event('evictions');
       image.texture.destroy(); image.tileTimes.destroy(); image.reprojection.destroy();
     }
   }
+  function trimImages(reserved, protectedImage) {
+    evictImages(planner.evictions(images, reserved, memoryBudget, maxCachedImages, protectedImage));
+  }
 
   function createJob(camera, width, height, speculative, displayed, extent) {
     const visibleWidth = width, visibleHeight = height;
-    const padX = Math.ceil(width * (extent - 1) / 2), padY = Math.ceil(height * (extent - 1) / 2);
-    width += 2 * padX; height += 2 * padY;
-    const bytes = width * height * 8;
-    const reserved = jobs.reduce((sum, job) => sum + job.bytes, bytes);
-    trimImages(reserved, displayed);
-    if (images.reduce((sum, image) => sum + image.bytes, reserved) > memoryBudget) return undefined;
+    const [textureWidth,textureHeight,padX,padY,bytes,totalTiles,tileBytes] =
+      new Float64Array(rust.memory.buffer,rust.job_geometry(width,height,extent),7).slice();
+    width=textureWidth; height=textureHeight;
+    const allocation=planner.allocation(images,jobs,bytes,memoryBudget,maxCachedImages,displayed);
+    evictImages(allocation.evicted);
+    if (!allocation.allowed) return undefined;
     metrics?.event('jobsCreated');
     const pointer = rust.prepare_view(...camera, visibleWidth, visibleHeight, width / height, height / visibleHeight);
     if (!pointer) throw new Error('Invalid render camera');
@@ -140,7 +137,7 @@ async function start() {
     device.queue.writeBuffer(referenceBuffer, 0,
       new Uint8Array(rust.memory.buffer, rust.reference_data_ptr(), (referenceLength + 1) * 16));
     const reprojection = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    const tileTimes = device.createBuffer({ size: Math.ceil(width / 64) * Math.ceil(height / 64) * 4,
+    const tileTimes = device.createBuffer({ size: tileBytes,
       usage: GPUBufferUsage.STORAGE });
     const view = texture.createView();
     const displayGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
@@ -161,7 +158,7 @@ async function start() {
     ] });
     return { id: nextImageId++, complete: false, texture, tileTimes, reprojection, displayGroup, bytes, camera, geometry: [visibleWidth, visibleHeight, padX, padY],
       frame, referenceLength, computeUniforms, referenceBuffer, computeGroup, repairGroup, speculative,
-      nextTile: 0, totalTiles: Math.ceil(width / 64) * Math.ceil(height / 64), used: performance.now(), createdAt: performance.now() };
+      nextTile: 0, totalTiles, used: performance.now(), createdAt: performance.now() };
   }
   const sliders = [
     ['zoom-level', 'zoom-value', rust.set_zoom_level, (value) => `${(2 ** value).toLocaleString(undefined, { maximumSignificantDigits: 3, notation: Math.abs(value) > 16 ? 'scientific' : 'standard' })}×`],
@@ -248,7 +245,7 @@ async function start() {
     if (!height) return;
     // Move the image with the pointer, converting CSS pixels to shader space.
     interacting();
-    rust.drag(-2 * (event.clientX - drag.x) / height, 2 * (event.clientY - drag.y) / height);
+    rust.navigation_drag(event.clientX-drag.x,event.clientY-drag.y,height);
     drag.x = event.clientX;
     drag.y = event.clientY;
   });
@@ -263,23 +260,17 @@ async function start() {
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
     if (!rect.height) return;
-    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1;
-    // Trackpad pinch arrives as Ctrl+wheel; normal two-finger scroll also zooms.
-    const sensitivity = event.ctrlKey ? 0.01 : 0.002;
-    const factor = Math.exp(Math.max(-0.5, Math.min(0.5, event.deltaY * unit * sensitivity)));
     interacting();
-    zoomDirection = factor < 1 ? 0.7 : 1 / 0.7;
-    zoomAnchor = [(2 * (event.clientX - rect.left) - rect.width) / rect.height,
-      (rect.height - 2 * (event.clientY - rect.top)) / rect.height];
-    rust.zoom_at(factor,
-      (2 * (event.clientX - rect.left) - rect.width) / rect.height,
-      (rect.height - 2 * (event.clientY - rect.top)) / rect.height);
+    const [direction,ax,ay]=new Float64Array(rust.memory.buffer,
+      rust.navigation_wheel(event.deltaY,event.deltaMode,Number(event.ctrlKey),
+        event.clientX-rect.left,event.clientY-rect.top,rect.width,rect.height),3);
+    zoomDirection=direction;zoomAnchor=[ax,ay];
     scheduleSliderSync();
   }, { passive: false });
   if (metrics) {
     const {mountDiagnostics} = await import('./diagnostics.mjs');
     mountDiagnostics({metrics,canvas,rust,interacting,syncSliders,controls,
-      clearCache:()=>{ activeSettings=''; },
+      clearCache:()=>rust.render_invalidate(),
       metadata:()=>({width:canvas.width,height:canvas.height,dpr:devicePixelRatio,
         userAgent:navigator.userAgent,iterations:new Float32Array(rust.memory.buffer,rust.read_settings(),4)[1],
         textureBudgetBytes:memoryBudget,maxJobs,maxTileBatch,fadeMs:fadeSeconds*1000}),
@@ -290,25 +281,21 @@ async function start() {
   async function render(now) {
     try {
       const encodingStarted=performance.now();
-      const scale = Math.min(devicePixelRatio, 1.5, 1600 / Math.max(innerWidth, innerHeight));
-      const width = Math.min(device.limits.maxTextureDimension2D, Math.max(1, Math.round(innerWidth * scale)));
-      const height = Math.min(device.limits.maxTextureDimension2D, Math.max(1, Math.round(innerHeight * scale)));
+      const [width,height]=new Float64Array(rust.memory.buffer,
+        rust.render_size(innerWidth,innerHeight,devicePixelRatio,device.limits.maxTextureDimension2D),2);
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       const texture = context.getCurrentTexture();
       const pointer = rust.update_frame(width, height, (now - startTime) / 1000);
       const frame = new Uint8Array(rust.memory.buffer, pointer, uniformSize).slice();
       device.queue.writeBuffer(uniforms, 0, frame);
-      const words = new Uint32Array(frame.buffer);
-      const moving = Boolean(drag) || now < interactiveUntil;
+      const moving = Boolean(rust.render_moving(now,lastInputAt??-Infinity,Number(Boolean(drag))));
       const exactCamera = Array.from(new Float64Array(rust.memory.buffer, rust.camera_ptr(), 3));
       const extent = rust.cache_extent();
-      const settings = [width, height, words[8], words[20]].join(',');
-      if (settings !== activeSettings) {
+      if (rust.render_settings_changed(width,height)) {
         [...jobs].forEach(disposeJob);
         images.splice(0).forEach(image => { image.texture.destroy(); image.tileTimes.destroy(); image.reprojection.destroy(); });
         planner.reset();
         displayBase = displayDetail = undefined;
-        activeSettings = settings;
       }
       const {ready, displayed} = planner.cached(images, exactCamera, width, height, now);
       if (displayed) displayed.used = now;
@@ -323,7 +310,7 @@ async function start() {
       const selection = planner.select(images, jobs, fadeSeconds * 1000);
       displayBase = selection.base; displayDetail = selection.detail; detailSince = selection.since;
       jobs.splice(0, jobs.length, ...selection.jobs);
-      const layers = displayDetail ? [displayBase, displayDetail] : [displayBase];
+      const layers = (displayDetail ? [displayBase, displayDetail] : [displayBase]).filter(Boolean);
       for (const [index, image] of layers.entries()) {
         image.used = now;
         device.queue.writeBuffer(image.reprojection, 0,
@@ -336,17 +323,14 @@ async function start() {
       let remainingTiles = rust.planner_batch_limit(tileBatch, Number(moving));
       for (const [index, job] of jobs.entries()) {
         if (!remainingTiles) break;
-        const computeFrame = job.frame.slice();
-        const computeFloats = new Float32Array(computeFrame.buffer);
-        computeFloats[0] = job.texture.width;
-        computeFloats[1] = job.texture.height;
-        computeFloats[2] = job.nextTile;
-        computeFloats[3] = job.referenceLength;
-        computeFloats[23] = now / 1000; // Arrival time for this batch of tiles.
-        computeFloats.set([job.geometry[2], job.geometry[3], job.geometry[0], job.geometry[1]], 16);
+        new Uint8Array(rust.memory.buffer,rust.compute_input_ptr(),uniformSize).set(job.frame);
+        const computePointer=rust.compute_frame(job.texture.width,job.texture.height,job.nextTile,
+          job.referenceLength,...job.geometry.slice(2),...job.geometry.slice(0,2),now/1000);
+        const computeFrame=new Uint8Array(rust.memory.buffer,computePointer,uniformSize);
+        const computeFloats=new Float32Array(rust.memory.buffer,computePointer,uniformSize/4);
         device.queue.writeBuffer(job.computeUniforms, 0, computeFrame);
         const share = rust.planner_batch_share(remainingTiles, index, jobs.length, Number(Boolean(ready)));
-        const batch = Math.min(share, job.totalTiles - job.nextTile);
+        const batch = rust.planner_batch_size(share,job.nextTile,job.totalTiles);
         remainingTiles -= batch;
         batches.push({ job, batch });
         encoder.clearBuffer(repairCount);
@@ -391,17 +375,17 @@ async function start() {
         const elapsed = performance.now() - submitted;
         const submittedTiles = batches.reduce((sum, item) => sum + item.batch, 0);
         tileBatch = rust.planner_tune_batch(submittedTiles, elapsed, Number(moving), maxJobs, maxTileBatch);
-        for (const { job } of batches) {
-          if (job.nextTile >= job.totalTiles) {
-            jobs.splice(jobs.indexOf(job), 1);
-            releaseJobBuffers(job);
-            metrics?.event('jobsCompleted');
-            job.complete = true;
-            job.completedAt = performance.now();
-            images.push(job);
-          }
+        planner.load(images,jobs);
+        for (const job of planner.completed()) {
+          jobs.splice(jobs.indexOf(job), 1);
+          releaseJobBuffers(job);
+          metrics?.event('jobsCompleted');
+          job.complete = true;
+          job.completedAt = performance.now();
+          images.push(job);
         }
-        trimImages(jobs.reduce((sum, job) => sum + job.bytes, 0), displayed ?? images.at(-1));
+        planner.load(images,jobs);
+        trimImages(rust.planner_bytes(1), displayed ?? images.at(-1));
       }
       if (metrics) {
         const finished=performance.now();
@@ -410,7 +394,7 @@ async function start() {
           inputAgeMs:lastInputAt===undefined?null:finished-lastInputAt,
           layers:layers.length,jobs:jobs.length,images:images.length,
           jobLatencyMs:batches.filter(item=>item.job.complete).map(item=>item.job.completedAt-item.job.createdAt),
-          textureBytes:[...images,...jobs].reduce((sum,image)=>sum+image.bytes,0),
+          textureBytes:planner.bytes(images,jobs),
           repairBytes:repairPixels.size, tiles:batches.reduce((sum,item)=>sum+item.batch,0),
           cacheHit:Boolean(ready),staleDetail:Boolean(displayDetail&&!displayDetail.complete&&!jobs.includes(displayDetail)),
           ...coverage(layers,exactCamera,width,height,finished,fadeSeconds*1000,detailSince),
@@ -419,7 +403,7 @@ async function start() {
       }
       // Do not leave the GPU idle until the next display refresh while work
       // remains. Yield to input, then submit the next bounded batch immediately.
-      if (jobs.length && !document.hidden) {
+      if (rust.render_continue(jobs.length,Number(document.hidden))) {
         workTimer = setTimeout(() => render(performance.now()), 0);
       } else {
         animationId = requestAnimationFrame(render);
