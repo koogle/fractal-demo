@@ -54,16 +54,16 @@ fn soft_shadow(origin:vec3<f32>, direction:vec3<f32>, maximum:f32, bias:f32)->f3
     var hit=false;var epsilon=0.0001;var trap=0.0;
     for(var i=0u;i<224u;i++) {
         if(f32(i)>=camera.settings.z || travel>far){break;}
-        epsilon=max(0.000015,travel*camera.screen.z/camera.screen.y*camera.settings.w);
+        epsilon=max(0.000001,travel*camera.screen.z/camera.screen.y*camera.settings.w);
         let sample=bulb(eye+ray*travel);trap=sample.y;
         if(sample.x<epsilon){hit=true;break;}
         travel+=max(sample.x*0.7,epsilon*0.25);
     }
     if(!hit){return vec4<f32>(sky,1);}
-    let p=eye+ray*travel;let n=normal_at(p,max(epsilon*1.5,0.00003));
+    let p=eye+ray*travel;let n=normal_at(p,max(epsilon*1.5,0.000002));
     let to_light=camera.light.xyz-p;
     let light=normalize(to_light);
-    let bias=max(epsilon*4.0,0.00015);
+    let bias=max(epsilon*4.0,0.00001);
     var shadow=0.0;
     if(dot(n,light)>0.0){shadow=soft_shadow(p+n*bias,light,length(to_light),bias);}
     let diffuse=max(dot(n,light),0.0);let fill=max(dot(n,normalize(vec3<f32>(0.8,0.1,-0.5))),0.0);

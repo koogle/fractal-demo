@@ -109,7 +109,10 @@ to panning and short orbit arcs, preventing large input jumps through the object
 Changing the fractal shape moves the camera back if the new surface encloses it.
 These are approximate fractal distance estimates, not exact mesh collisions. Distance estimation is
 approximate, GPU arithmetic has finite precision, and zoom distance is bounded
-from 0.02 to 80 scene units. This 3D path does not offer arbitrary-depth precision
+from 0.00002 to 80 scene units. Inward dolly and pan steps scale with nearby
+surface clearance, letting close-up navigation slow naturally. The collision
+guard is 0.00002 scene units (previously 0.006), so approach is much closer but
+still bounded by GPU precision. This 3D path does not offer arbitrary-depth precision
 or the 2D benchmark's performance guarantees. The model requires no asset downloads.
 
 ## Rust runtime

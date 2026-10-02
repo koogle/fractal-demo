@@ -45,7 +45,8 @@ fn basis(c: &Camera) -> ([f64; 3], [f64; 3], [f64; 3]) {
 }
 // Conservative CPU counterpart of the shader DE for camera collision only.
 // Sweep the whole movement, not just the endpoint, so large wheel events cannot tunnel.
-const CAMERA_CLEARANCE: f64 = 0.006;
+// Keep a small precision guard above the f32 ray marcher’s hit threshold.
+const CAMERA_CLEARANCE: f64 = 0.00002;
 fn eye(c: &Camera) -> [f64; 3] {
     let (_, _, forward) = basis(c);
     std::array::from_fn(|i| c.target[i] - forward[i] * c.distance)
@@ -87,6 +88,11 @@ fn clearance(p: [f64; 3], c: &Camera) -> f64 {
         0.0
     }
 }
+fn navigation_span(c: &Camera) -> f64 {
+    (clearance(eye(c), c) - CAMERA_CLEARANCE)
+        .max(CAMERA_CLEARANCE * 0.25)
+        .min(c.distance)
+}
 fn sweep(from: [f64; 3], to: [f64; 3], c: &Camera) -> f64 {
     let delta = std::array::from_fn(|i| to[i] - from[i]);
     let total = length(delta);
@@ -100,7 +106,7 @@ fn sweep(from: [f64; 3], to: [f64; 3], c: &Camera) -> f64 {
         if safe <= 1e-7 {
             // At the stopping boundary, allow a tiny step only if it increases
             // clearance. Otherwise zooming back out could get stuck too.
-            let probe = (traveled + 0.0001).min(total);
+            let probe = (traveled + CAMERA_CLEARANCE * 0.25).min(total);
             let q = std::array::from_fn(|i| from[i] + delta[i] * probe / total);
             if clearance(q, c) > clearance(p, c) + 1e-9 {
                 traveled = probe;
@@ -175,7 +181,7 @@ pub extern "C" fn scene3d_pan(dx: f64, dy: f64) {
     CAMERA.with(|c| {
         let mut c = c.borrow_mut();
         let (right, up, _) = basis(&c);
-        let span = c.distance * 0.9;
+        let span = navigation_span(&c) * 0.9;
         let mut next = *c;
         for i in 0..3 {
             next.target[i] =
@@ -192,7 +198,15 @@ pub extern "C" fn scene3d_zoom(factor: f64) {
     CAMERA.with(|c| {
         let mut c = c.borrow_mut();
         let mut next = *c;
-        next.distance = (c.distance * factor).clamp(0.02, 80.0);
+        // Approach by a fraction of free space, rather than repeatedly slamming
+        // a center-relative dolly step into the collision barrier. Backing out
+        // retains the original speed so leaving a close-up is easy.
+        let delta = if factor < 1.0 {
+            navigation_span(&c) * (factor.max(0.1) - 1.0)
+        } else {
+            c.distance * (factor - 1.0)
+        };
+        next.distance = (c.distance + delta).clamp(CAMERA_CLEARANCE, 80.0);
         move_camera(&mut c, next);
     });
 }
